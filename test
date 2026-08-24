@@ -117,5 +117,6 @@ _G.HamsterConfig = {
     AutoSaveConfig = false,
 }
 
+
 script_key = "KJaJgMNFgcoGqCuZxTDUNJzRMjpdFktx";
 loadstring(game:HttpGet("https://api.luarmor.net/files/v4/loaders/663afda8ed216fab2bc492c638576b26.lua"))()
