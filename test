@@ -1,0 +1,121 @@
+repeat task.wait() until game:IsLoaded()
+task.wait(1)
+
+_G.HamsterConfig = {
+    Area = "ALL",
+    MoveMode = "warp",
+    StayCentre = true,
+    StartupGrace = 1,      -- กลับเป็นค่าเดิม
+    ViaHome = true,
+    WarpRequirePatch = false,
+    WarpSettle = 0.18,
+    DepositWait = 0.12,
+    PreResetHold = 20,
+    PreWarpOnReset = false,
+    ResetWaitMax = 90,
+    TreadmillWatch = true,
+    StallWatch = false,
+    LiftThreshold = false,
+    KillCorrections = false,
+    ExpireOnArrive = false,
+    NetWatch = false,
+    MuteViolation = false,
+    AdoptBaseline = false,
+    ChainGrab = 5,
+    ChainGrabFresh = 5,
+    PreResetQuiet = 20,
+    GrabAfterResetFor = 20,
+    ResetHoldFor = 18,
+    WarpSnapGround = true,
+    HatchPerCycle = 0,
+    SellPerCycle = 0,
+    TendEvery = 5,
+    Step = 55,
+    Gap = 0.10,
+    ImpulseBypass = true,
+    DeclareVelocity = false,
+    UsePrompt = false,
+    DangerBrake = false,
+
+    MoveSpeed = 700,
+    ApproachDist = 10,
+    ApproachSpeed = 0,   
+    RemoteGap = 0.10,
+    RemoteBurst = 8,
+    RequirePatch = false, 
+    ScanSlowLimit = 999,   -- ปิดกลับ: ไม่ปิดการสแกนอีก (999 = ไม่มีทางถึงเกณฑ์)
+    AutoWeakMode = false,   -- ปิดกลับ: เคยทำให้เครื่องที่รันได้อยู่ถอยลงมาช้าฟรีๆ
+    WeakFpsLimit = 25,
+    AutoIndex = true,
+    PatchSlowGap = 60,
+
+    ----------------------------------------------------------------
+    -- เก็บครบ 5 -> ยืนวิ่งสะสม speed -> เหลือ 20 วิค่อยกลับจุดกลาง
+    ----------------------------------------------------------------
+    RideTreadmill = true,
+    --   Grey x1.5 $100 · Green x2 $5K · Blue x2.5 $75K · Purple x3 $1.5M
+    --   Golden x3.5 $30M · Red x4 $750M · Galaxy x5 $20B · Secret x7 $500B
+    --   Eternal x10 $12.5T · Divine x14 $300T
+    AutoTrail = true,
+    AutoTreadmill = true,
+    HatchWhenBusy = 3,
+    DodgeTraps = true,
+    CarrySpeedMul = 0.5,
+    SpeedSafety = 0.9,
+    WalkReach = 6,
+    WarpInstant = false,
+    PinHold = true,
+    BlockDeath = false,
+    WarmupSteps = 8,
+    WarmupGapMul = 2.5,
+    WarmupUntilX = 1020,
+    WarmupHold = 1.5,
+    SafeZonePause = 1.5,
+    LoopDelay = 2,         
+
+    ----------------------------------------------------------------
+    -- การทำงานที่ฐาน
+    ----------------------------------------------------------------
+    AutoStart = true,
+    AutoHatch = true,
+    AutoUpgrade = true,
+    AutoSell = true,
+    SkipWeak = false,
+    SkipWorseThanPen = false,
+    KeepExtra = 0,
+
+    -- ห้ามขายสัตว์ที่ทำเงินตั้งแต่เท่านี้ขึ้นไป
+    --     KeepAbove = 10000000  ใส่ตัวเลขล้วนแบบเดิมก็ยังได้
+    --
+    --     k = พัน · m = ล้าน · b = พันล้าน · t = ล้านล้าน · q = พันล้านล้าน
+    --     พิมพ์เล็กใหญ่ไม่เกี่ยง  ใส่ลูกน้ำได้ "1,500,000"
+    --
+    -- 0 = ไม่สนราคา ขายตามอันดับล้วนๆ (ตัวที่ทำเงินน้อยสุดโดนขายก่อน)
+    KeepAbove = 0,
+
+    -- ไข่ที่ทำเงินต่ำกว่านี้ไม่ต้องออกไปเก็บ  เขียนแบบเดียวกับ KeepAbove ได้
+    -- 0 = คิดให้เอง (1% ของตัวที่ดีที่สุดที่มีอยู่)
+    MinEggRate = 0,
+    TripReserve = 40,
+
+    ----------------------------------------------------------------
+    -- อื่นๆ
+    ----------------------------------------------------------------
+    ShowUI = false,
+    StatusText = true,
+    StatusTextSize = 18,
+    StatusTextY = 0.5,
+    Noclip = false,
+    GroundSnap = true,
+    SmoothCam = true,
+    CamSmooth = 8,
+    PerfMode = true,
+    FpsBoost = true,
+
+    BlankScreen = false,
+    AntiAFK = true,
+    AutoSaveConfig = false,
+}
+
+script_key = "KJaJgMNFgcoGqCuZxTDUNJzRMjpdFktx";
+loadstring(game:HttpGet("https://api.luarmor.net/files/v4/loaders/663afda8ed216fab2bc492c638576b26.lua"))()
