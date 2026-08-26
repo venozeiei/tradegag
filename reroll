@@ -52,13 +52,8 @@ local VirtualInputManager = game:GetService("VirtualInputManager")
 local GuiService = game:GetService("GuiService")
 local TeleportService = game:GetService("TeleportService")
 
-while not Players.LocalPlayer do task.wait(0.1) end
-local plr = Players.LocalPlayer
-local playerGui = plr:WaitForChild("PlayerGui", 999)
-local interface = playerGui:WaitForChild("Interface", 999)
-
 -- 📡 สะพานส่งข้อความหา Horst: ในโหมด Actor ฟังก์ชัน Horst อยู่คนละ VM
--- ต้องยิงผ่าน comm channel กลับไปให้ฝั่งหลักส่งต่อ
+-- ต้องยิงผ่าน comm channel กลับไปให้ฝั่งหลักส่งต่อ (ตั้งก่อนอย่างอื่นทั้งหมด จะได้รายงานได้ตั้งแต่ต้น)
 local commEvent = nil
 pcall(function()
     local id = getgenv and getgenv().Venoz_CommId
@@ -66,6 +61,27 @@ pcall(function()
         commEvent = get_comm_channel(id)
     end
 end)
+
+-- 🔍 trace: ขึ้น console ฝั่งหลักอย่างเดียว (ไม่ส่งเข้า Horst) ไว้ตามรอยว่าถึงขั้นไหนแล้ว
+local function trace(m)
+    print("[Venoz-trace] " .. m)
+    if commEvent then pcall(function() commEvent:Fire("[trace] " .. m) end) end
+end
+
+-- ⛔ รายงาน error ออก console + Horst แทนที่จะตายเงียบใน actor
+local function reportError(where, err)
+    local msg = "⛔ ERROR ที่ " .. where .. ": " .. tostring(err)
+    print("[Venoz] " .. msg)
+    if commEvent then pcall(function() commEvent:Fire(msg) end) end
+end
+
+trace("MAIN เริ่มทำงานแล้ว (in actor/vm)")
+
+while not Players.LocalPlayer do task.wait(0.1) end
+local plr = Players.LocalPlayer
+local playerGui = plr:WaitForChild("PlayerGui", 999)
+local interface = playerGui:WaitForChild("Interface", 999)
+trace("ได้ LocalPlayer + Interface แล้ว")
 
 local function setHorstDesc(msg)
     local func = _G.Horst_SetDescription or (getgenv and getgenv().Horst_SetDescription)
@@ -169,6 +185,8 @@ hudStroke.Parent = hudLabel
 local function setHud(text)
     pcall(function() hudLabel.Text = text end)
 end
+
+trace("สร้าง HUD เสร็จแล้ว")
 
 local function Status(msg)
     print("📢 [Venoz] " .. msg)
@@ -320,9 +338,11 @@ end
 -- ⚔️ TITLE SCREEN MODE (NO UI - TEXT STATUS ONLY)
 -- ============================================================
 -- ใส่ timeout ทุกตัว กันเธรดค้างตลอดกาลถ้าโครงสร้างเกมเปลี่ยน
+trace("Title Mode: กำลังหา Remote GET...")
 local Assets = ReplicatedStorage:WaitForChild("Assets", 30)
 local Remotes = Assets and Assets:WaitForChild("Remotes", 30)
 local GET = Remotes and Remotes:WaitForChild("GET", 10)
+trace("Remote GET: " .. tostring(GET ~= nil))
 
 local function StartAutoRoll()
     Status("Checking Gamepass & System...")
@@ -595,6 +615,7 @@ local function StartAutoRoll()
     local ROLL_COOLDOWN = 4
     local rollCount = 0
     local failStreak = 0
+    trace("เข้าลูปสุ่มหลักแล้ว (ยิงทุก " .. ROLL_COOLDOWN .. " วิ)")
     while running() do
         local okRoll, results = pcall(function() return {GET:InvokeServer("Family", "Roll")} end)
         if not okRoll then
@@ -720,9 +741,17 @@ local function StartAutoRoll()
 end
 
 -- 🚀 เริ่มทำงานอัตโนมัติทันที (ไม่มี UI ให้กดแล้ว คุมผ่าน Config อย่างเดียว)
+-- ห่อ xpcall: พังตรงไหนใน actor จะพ่น error + traceback ออก console ไม่ตายเงียบ
 if _G.AutoRoll then
     Status("Auto Roll starting... Slot:" .. _G.TargetSlot)
-    task.spawn(StartAutoRoll)
+    task.spawn(function()
+        local ok, err = xpcall(StartAutoRoll, function(e)
+            return debug.traceback(tostring(e), 2)
+        end)
+        if not ok then
+            reportError("StartAutoRoll", err)
+        end
+    end)
 else
     Status("AutoRoll = false in Config. Bot idle.")
 end
@@ -768,10 +797,13 @@ if type(ccc) == "function" then
     local okC, commId, commEvent = pcall(ccc)
     if okC and commId ~= nil and commEvent ~= nil then
         commEvent.Event:Connect(function(msg)
+            msg = tostring(msg)
             -- โชว์ log ใน console ฝั่งหลักด้วย (print จากใน actor ไม่ขึ้น console ของ executor)
-            print("📢 [Venoz] " .. tostring(msg))
+            print("📢 [Venoz] " .. msg)
+            -- [trace] = ขึ้น console อย่างเดียว ไม่ต้องรบกวน Horst
+            if string.sub(msg, 1, 7) == "[trace]" then return end
             local f = _G.Horst_SetDescription or (getgenv and getgenv().Horst_SetDescription)
-            if type(f) == "function" then pcall(f, tostring(msg)) end
+            if type(f) == "function" then pcall(f, msg) end
         end)
         if type(commId) == "number" then
             header = header .. ("getgenv().Venoz_CommId = " .. tostring(commId) .. "\n")
