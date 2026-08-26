@@ -1,8 +1,13 @@
 -- ============================================================
 -- 🚀 Venoz Eiei Hub - AoT Revolution (Auto Roll + Auto Quest)
--- ⚙️ V.27 - NO UI MODE (Text Status + Real-time Horst Update)
+-- ⚙️ V.29 - ACTOR MODE (run_on_actor + Real-time Spin Sync)
+-- ============================================================
+-- โครงสร้าง: สคริปต์หลักถูกห่อเป็น MAIN_SOURCE แล้วยิงเข้า Actor
+-- ด้วย run_on_actor (จำเป็นสำหรับ executor นี้ ไม่งั้นลูป remote ค้าง)
+-- ข้อความสถานะส่งกลับมาหา Horst ผ่าน comm channel
 -- ============================================================
 
+local MAIN_SOURCE = [==[
 local Config = getgenv().Venoz_Config or {
     AutoRoll = true,
     TargetSlot = "A",
@@ -10,10 +15,27 @@ local Config = getgenv().Venoz_Config or {
     Delay = 0.5
 }
 
+-- 🛡️ กัน config เพี้ยน: ไม่ใช่ table หรือรายชื่อเป้าหมายว่าง = ใช้ค่าเริ่มต้น
+-- (ถ้าปล่อยรายชื่อว่างผ่านไป บอทจะมองทุกตระกูลเป็นขยะแล้วลบเกลี้ยงกระเป๋า!)
+if type(Config) ~= "table" then
+    Config = {AutoRoll = true, TargetSlot = "A", TargetFamilies = {"Helos", "Fritz", "Ackerman"}, Delay = 0.5}
+end
+if type(Config.TargetFamilies) ~= "table" or #Config.TargetFamilies == 0 then
+    Config.TargetFamilies = {"Helos", "Fritz", "Ackerman"}
+end
+
 _G.AutoRoll = Config.AutoRoll
 _G.TargetSlot = Config.TargetSlot
 _G.TargetFamilies = Config.TargetFamilies
 _G.Delay = Config.Delay
+
+-- 🔑 Run Token: รันสคริปต์ใหม่ = เลขรุ่นใหม่ ลูปของรอบเก่าเห็นเลขไม่ตรงจะหยุดเองทันที
+-- (กันปัญหารันซ้ำแล้วมีลูปเก่าแย่งยิง Roll จนตั๋วหายฟรี)
+_G.VenozRun = (_G.VenozRun or 0) + 1
+local RUN_ID = _G.VenozRun
+local function running()
+    return _G.AutoRoll and _G.VenozRun == RUN_ID
+end
 
 local MasterPriorityList = {
     "Helos", "Fritz",
@@ -35,13 +57,39 @@ local plr = Players.LocalPlayer
 local playerGui = plr:WaitForChild("PlayerGui", 999)
 local interface = playerGui:WaitForChild("Interface", 999)
 
--- 📡 ส่งข้อความสถานะ: ขึ้นทั้ง Console และ Horst แบบเรียลไทม์ (แทน UI)
+-- 📡 สะพานส่งข้อความหา Horst: ในโหมด Actor ฟังก์ชัน Horst อยู่คนละ VM
+-- ต้องยิงผ่าน comm channel กลับไปให้ฝั่งหลักส่งต่อ
+local commEvent = nil
+pcall(function()
+    local id = getgenv and getgenv().Venoz_CommId
+    if id ~= nil and get_comm_channel then
+        commEvent = get_comm_channel(id)
+    end
+end)
+
 local function setHorstDesc(msg)
     local func = _G.Horst_SetDescription or (getgenv and getgenv().Horst_SetDescription)
-    if type(func) == "function" then pcall(func, msg) end
+    if type(func) == "function" then
+        pcall(func, msg)
+    elseif commEvent then
+        pcall(function() commEvent:Fire(msg) end)
+    end
 end
 
 -- 🖥️ Text Log ลอยบนจอเกม (ไม่ใช่ UI มีแค่ตัวหนังสือโชว์สถานะ)
+-- ลบ log ของรอบก่อนทิ้งก่อน กันซ้อนกันหลายอันตอนรันซ้ำ
+pcall(function()
+    local spots = {}
+    if gethui then table.insert(spots, gethui()) end
+    table.insert(spots, game:GetService("CoreGui"))
+    table.insert(spots, playerGui)
+    for _, spot in ipairs(spots) do
+        for _, ch in ipairs(spot:GetChildren()) do
+            if ch.Name == "VenozLog" then ch:Destroy() end
+        end
+    end
+end)
+
 local logGui = Instance.new("ScreenGui")
 logGui.Name = "VenozLog"
 logGui.ResetOnSpawn = false
@@ -51,54 +99,79 @@ local okParent = pcall(function()
 end)
 if not okParent or not logGui.Parent then logGui.Parent = playerGui end
 
+-- HUD เล็กๆ บรรทัดเดียวกลางจอ: โชว์แค่ Rolls / Fam / Bag
+-- (log เต็มทุกบรรทัดยังส่งเข้า Horst + console ครบเหมือนเดิม)
 local logFrame = Instance.new("Frame")
 logFrame.Name = "LogFrame"
-logFrame.AnchorPoint = Vector2.new(0, 1)
-logFrame.Position = UDim2.new(0, 10, 1, -10)
-logFrame.Size = UDim2.new(0, 460, 0, 130)
-logFrame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-logFrame.BackgroundTransparency = 0.35
+logFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+logFrame.Position = UDim2.new(0.5, 0, 0.5, 0) -- 🎯 กลางจอ
+logFrame.Size = UDim2.new(0, 400, 0, 62)
+logFrame.BackgroundColor3 = Color3.fromRGB(10, 10, 15)
+logFrame.BackgroundTransparency = 0.25
 logFrame.BorderSizePixel = 0
 logFrame.Parent = logGui
 
 local logCorner = Instance.new("UICorner")
-logCorner.CornerRadius = UDim.new(0, 8)
+logCorner.CornerRadius = UDim.new(0, 10)
 logCorner.Parent = logFrame
 
+-- ✨ ขอบทองเรืองรอบกรอบ
+local frameStroke = Instance.new("UIStroke")
+frameStroke.Color = Color3.fromRGB(255, 190, 60)
+frameStroke.Thickness = 1.4
+frameStroke.Transparency = 0.25
+frameStroke.Parent = logFrame
+
+-- 🏆 หัวข้อ VENOZ EIEI แบบไล่สีทอง + ขอบดำ
 local logTitle = Instance.new("TextLabel")
 logTitle.BackgroundTransparency = 1
-logTitle.Position = UDim2.new(0, 10, 0, 4)
-logTitle.Size = UDim2.new(1, -20, 0, 20)
-logTitle.Font = Enum.Font.GothamBold
+logTitle.Position = UDim2.new(0, 10, 0, 5)
+logTitle.Size = UDim2.new(1, -20, 0, 18)
+logTitle.Font = Enum.Font.GothamBlack
 logTitle.TextSize = 14
-logTitle.TextColor3 = Color3.fromRGB(255, 170, 0)
-logTitle.TextXAlignment = Enum.TextXAlignment.Left
-logTitle.Text = "🚀 Venoz Eiei | Auto Roll Log"
+logTitle.TextColor3 = Color3.fromRGB(255, 215, 90)
+logTitle.TextXAlignment = Enum.TextXAlignment.Center
+logTitle.Text = "⚔️ VENOZ EIEI HUB ⚔️"
 logTitle.Parent = logFrame
 
-local logLabel = Instance.new("TextLabel")
-logLabel.BackgroundTransparency = 1
-logLabel.Position = UDim2.new(0, 10, 0, 26)
-logLabel.Size = UDim2.new(1, -20, 1, -32)
-logLabel.Font = Enum.Font.Code
-logLabel.TextSize = 13
-logLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-logLabel.TextXAlignment = Enum.TextXAlignment.Left
-logLabel.TextYAlignment = Enum.TextYAlignment.Top
-logLabel.TextWrapped = true
-logLabel.Text = "รอเริ่มทำงาน..."
-logLabel.Parent = logFrame
+local titleStroke = Instance.new("UIStroke")
+titleStroke.Color = Color3.fromRGB(60, 30, 0)
+titleStroke.Thickness = 1.2
+titleStroke.Parent = logTitle
 
-local logLines = {}
-local function pushLog(msg)
-    table.insert(logLines, os.date("%H:%M:%S") .. " " .. msg)
-    if #logLines > 6 then table.remove(logLines, 1) end
-    pcall(function() logLabel.Text = table.concat(logLines, "\n") end)
+local titleGradient = Instance.new("UIGradient")
+titleGradient.Color = ColorSequence.new({
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 235, 150)),
+    ColorSequenceKeypoint.new(0.5, Color3.fromRGB(255, 190, 40)),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 140, 20)),
+})
+titleGradient.Rotation = 90
+titleGradient.Parent = logTitle
+
+-- 📊 บรรทัดสถานะ (บรรทัดเดียวจบ)
+local hudLabel = Instance.new("TextLabel")
+hudLabel.BackgroundTransparency = 1
+hudLabel.Position = UDim2.new(0, 10, 0, 26)
+hudLabel.Size = UDim2.new(1, -20, 0, 28)
+hudLabel.Font = Enum.Font.GothamBold
+hudLabel.TextSize = 16
+hudLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+hudLabel.TextXAlignment = Enum.TextXAlignment.Center
+hudLabel.TextWrapped = true
+hudLabel.Text = "⏳ กำลังเริ่มระบบ..."
+hudLabel.Parent = logFrame
+
+local hudStroke = Instance.new("UIStroke")
+hudStroke.Color = Color3.fromRGB(0, 0, 0)
+hudStroke.Thickness = 1
+hudStroke.Parent = hudLabel
+
+local function setHud(text)
+    pcall(function() hudLabel.Text = text end)
 end
 
 local function Status(msg)
     print("📢 [Venoz] " .. msg)
-    pushLog(msg)
     setHorstDesc(msg)
 end
 
@@ -142,7 +215,7 @@ for i = 1, 30 do
         break
     end
 
-    -- 🆕 ถ้าสแกนไปสักพักยังไม่เจออะไรเลย อาจอยู่ Lobby ที่เมนูซ่อนอยู่ → ลองกด Tab เรียกเมนู
+    -- ถ้าสแกนไปสักพักยังไม่เจออะไรเลย อาจอยู่ Lobby ที่เมนูซ่อนอยู่ - ลองกด Tab เรียกเมนู
     if i == 8 or i == 16 or i == 24 then
         print("⌨️ ยังไม่เจอ UI... ลองกด [Tab] เผื่ออยู่ Lobby ที่เมนูซ่อนอยู่")
         VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Tab, false, game)
@@ -235,8 +308,10 @@ end
 -- ============================================================
 -- ⚔️ TITLE SCREEN MODE (NO UI - TEXT STATUS ONLY)
 -- ============================================================
-local Remotes = ReplicatedStorage:WaitForChild("Assets"):WaitForChild("Remotes")
-local GET = Remotes:WaitForChild("GET", 10)
+-- ใส่ timeout ทุกตัว กันเธรดค้างตลอดกาลถ้าโครงสร้างเกมเปลี่ยน
+local Assets = ReplicatedStorage:WaitForChild("Assets", 30)
+local Remotes = Assets and Assets:WaitForChild("Remotes", 30)
+local GET = Remotes and Remotes:WaitForChild("GET", 10)
 
 local function StartAutoRoll()
     Status("Checking Gamepass & System...")
@@ -265,17 +340,18 @@ local function StartAutoRoll()
     Status("Loading bag data from server...")
 
     local function getPriority(name)
+        -- ใช้ plain find (ตัวสุดท้าย true) กันชื่อที่มีอักขระพิเศษทำ pattern พังแล้วเธรดตาย
         local upName = string.upper(name)
         local isTarget = false
         for _, target in ipairs(_G.TargetFamilies) do
-            if string.find(upName, string.upper(target)) then
+            if string.find(upName, string.upper(tostring(target)), 1, true) then
                 isTarget = true
                 break
             end
         end
         if not isTarget then return 9999 end
         for i, master in ipairs(MasterPriorityList) do
-            if string.find(upName, string.upper(master)) then return i end
+            if string.find(upName, string.upper(master), 1, true) then return i end
         end
         return 9999
     end
@@ -297,41 +373,51 @@ local function StartAutoRoll()
                 end
             end
             local inventory = data.Slots[activeSlot].Inventory
-            local famIdx = {}
             if inventory and type(inventory.Families) == "table" then
-                for i, famName in ipairs(inventory.Families) do
+                for _, famName in ipairs(inventory.Families) do
                     if type(famName) == "string" and famName ~= "" and famName ~= "None" then
                         table.insert(fams, famName)
-                        table.insert(famIdx, i) -- จำตำแหน่งจริงในกระเป๋า (ระบบ Delete ใหม่ใช้เลขช่อง)
                     end
                 end
                 filledCount = #fams
             end
-            return maxSlots, filledCount, fams, famIdx
         end
-        return maxSlots, filledCount, fams, {}
+        return maxSlots, filledCount, fams
     end
 
-    -- 🎒 เก็บสถานะกระเป๋าไว้ในเครื่อง (ไม่ต้องยิงเซิร์ฟทุกรอบ = เรียลไทม์กว่าเดิม)
-    local bagMax, bagCount, bagFams, bagIdx = 1, 0, {}, {}
+    -- 🎒 เก็บสถานะกระเป๋า + จำนวนโรลไว้ในเครื่อง (อัปเดตจากเซิร์ฟเวอร์เป็นจังหวะ)
+    local bagMax, bagCount, bagFams = 1, 0, {}
+    local spinsLeft = -1 -- จำนวนโรลคงเหลือจริงจากเซิร์ฟเวอร์ (Spins + Extra), -1 = ยังไม่รู้
 
     local function bagText()
         local famListText = bagCount > 0 and table.concat(bagFams, ", ") or "None"
         return string.format("%d/%d %s", bagCount, bagMax, famListText)
     end
 
+    -- แบบย่อสำหรับ HUD บนจอ (มีชื่อเฉพาะตอนมีของ)
+    local function bagShort()
+        if bagCount > 0 then
+            return string.format("%d/%d %s", bagCount, bagMax, table.concat(bagFams, ","))
+        end
+        return string.format("%d/%d", bagCount, bagMax)
+    end
+
     local function refreshBag()
         local ok, data = pcall(function() return GET:InvokeServer("Functions", "Settings", "Blur", "Off") end)
         if ok and type(data) == "table" and type(data.Slots) == "table" then
-            bagMax, bagCount, bagFams, bagIdx = getBagInfo(data, _G.TargetSlot)
+            bagMax, bagCount, bagFams = getBagInfo(data, _G.TargetSlot)
             -- กันคำนวณ max พลาด: ถ้าของในกระเป๋าเยอะกว่า max ที่คำนวณได้ ให้เชื่อจำนวนของจริง
             if bagCount > bagMax then bagMax = bagCount end
+            -- 🎰 ดึงจำนวนโรลจริงจากเซิร์ฟเวอร์: Spins ปกติ + Extra Spins
+            local s = type(data.Spins) == "number" and data.Spins or 0
+            local e = type(data.Extra) == "number" and data.Extra or 0
+            spinsLeft = s + e
             return data
         end
         return nil
     end
 
-    -- 🗑️ ลบตระกูลออกจากกระเป๋าด้วยชื่อ (เทสกับเซิร์ฟเวอร์จริงแล้ว: ส่งชื่อ = true, ส่งเลข = false)
+    -- 🗑️ ลบตระกูลออกจากกระเป๋าด้วยชื่อ (เทสกับเซิร์ฟเวอร์จริงแล้ว: ส่งชื่อ = true)
     local function deleteFamilyByName(name)
         local ok, res = pcall(function()
             return GET:InvokeServer("Family", "Delete", name)
@@ -339,22 +425,54 @@ local function StartAutoRoll()
         return ok and res == true
     end
 
+    -- 🔄 ซิงค์เลขบนปุ่ม ROLL / PITY ในเกมให้ตรงกับค่าจริงจากเซิร์ฟเวอร์
+    -- (ปกติเกมอัปเดตเลขนี้เฉพาะตอนกดปุ่มสุ่มเอง สุ่มผ่าน remote เลขบนจอจะค้างของเก่า)
+    local uiRollLabel, uiPityLabel
+    local uiScanNext = 0
+    local function syncGameUI(total, pity)
+        pcall(function()
+            local needRoll = not (uiRollLabel and uiRollLabel.Parent)
+            local needPity = not (uiPityLabel and uiPityLabel.Parent)
+            if (needRoll or needPity) and os.clock() >= uiScanNext then
+                uiScanNext = os.clock() + 10 -- สแกนหาป้ายซ้ำไม่เกินทุก 10 วิ กันหน่วง
+                for _, dsc in ipairs(interface:GetDescendants()) do
+                    if dsc:IsA("TextLabel") then
+                        if needRoll and string.match(dsc.Text, "^ROLL %(") then
+                            uiRollLabel = dsc
+                            needRoll = false
+                        elseif needPity and string.find(dsc.Text, "PITY", 1, true) then
+                            uiPityLabel = dsc
+                            needPity = false
+                        end
+                        if not needRoll and not needPity then break end
+                    end
+                end
+            end
+            if uiRollLabel and uiRollLabel.Parent then
+                uiRollLabel.Text = "ROLL (" .. tostring(total) .. ")"
+            end
+            if uiPityLabel and uiPityLabel.Parent and pity then
+                uiPityLabel.Text = "EPIC+ PITY: " .. tostring(pity) .. "/400"
+            end
+        end)
+    end
+
     local serverData = nil
     local initTries = 0
-    while _G.AutoRoll and initTries < 10 do
+    while running() and initTries < 10 do
         serverData = refreshBag()
         if serverData then break end
         initTries = initTries + 1
         task.wait(1)
     end
 
-    if not _G.AutoRoll then return end
+    if not running() then return end
 
     -- ⚠️ โหลดข้อมูลไม่ได้ = ไปต่อแบบต้นฉบับ (ข้อมูลจะโหลดได้เองหลังเลือก Slot) ห้ามหยุด!
     if not serverData then
         Status("⚠️ ยังโหลดข้อมูลกระเป๋าไม่ได้ ไปต่อก่อน เดี๋ยวลองใหม่หลังเลือก Slot")
     else
-        Status(string.format("🎒 Bag check: max=%d, filled=%d, fams=%s", bagMax, bagCount, table.concat(bagFams, ", ")))
+        Status(string.format("🎒 Rolls:%d Bag: max=%d, filled=%d, fams=%s", spinsLeft, bagMax, bagCount, table.concat(bagFams, ", ")))
 
         -- 🛑 ตรวจสอบช่องกระเป๋า (เฉพาะตอนที่มีข้อมูลจริงเท่านั้น ไม่เดาจากข้อมูลว่าง)
         -- (ถ้ามีตระกูลในกระเป๋าครบ 6 ตัวแล้ว = ช่องต้องมีอย่างน้อย 6 อยู่แล้ว ไม่ต้องไป Lobby)
@@ -368,17 +486,22 @@ local function StartAutoRoll()
         end
 
         -- 🧹 เคลียร์เผ่าที่ไม่ได้อยู่ในเป้าหมายออกจากกระเป๋า
-        -- (ลบทีละตัวแล้วโหลดกระเป๋าใหม่ทุกครั้ง เพราะเลขช่องขยับหลังลบ)
+        -- (ลบทีละตัวแล้วโหลดกระเป๋าใหม่ทุกครั้ง กันข้อมูลค้าง
+        --  ตัวที่ลบไม่สำเร็จจะจดไว้แล้วข้าม ไม่ทิ้งทั้งรอบเพราะพลาดตัวเดียว)
         Status("Clearing non-target families...")
+        local failedDeletes = {}
         local clearing = true
-        while clearing do
+        while clearing and running() do
             clearing = false
             for _, fam in ipairs(bagFams) do
-                if getPriority(fam) == 9999 then
+                if getPriority(fam) == 9999 and not failedDeletes[fam] then
                     if deleteFamilyByName(fam) then
                         Status("🗑️ ลบ " .. fam .. " ออกจากกระเป๋า")
-                        clearing = true
+                    else
+                        failedDeletes[fam] = true
+                        Status("⚠️ ลบ " .. fam .. " ไม่สำเร็จ ข้ามตัวนี้ไปก่อน")
                     end
+                    clearing = true
                     task.wait(0.5)
                     refreshBag()
                     break
@@ -386,8 +509,10 @@ local function StartAutoRoll()
             end
         end
 
-        Status("Ready! Bag: " .. bagText())
+        Status(string.format("Ready! Rolls:%d Bag: %s", spinsLeft, bagText()))
     end
+
+    if not running() then return end
 
     -- ▶️ กดปุ่ม PLAY เข้าสู่หน้า Slot อัตโนมัติ
     pcall(function()
@@ -404,7 +529,7 @@ local function StartAutoRoll()
 
     -- ⚡ Anti-AFK (ทำงานเบื้องหลัง ไม่ขัดขวางลูปหลัก)
     task.spawn(function()
-        while _G.AutoRoll do
+        while running() do
             pcall(function()
                 if plr and plr.Character and plr.Character:FindFirstChild("HumanoidRootPart") then
                     local hrp = plr.Character.HumanoidRootPart
@@ -417,15 +542,17 @@ local function StartAutoRoll()
         end
     end)
 
+    if not running() then return end
     GET:InvokeServer("Functions", "Select", _G.TargetSlot)
     task.wait(1)
 
     -- 🔄 ถ้าตอนแรกโหลดข้อมูลกระเป๋าไม่ได้ ลองใหม่หลังเลือก Slot แล้ว (จังหวะนี้มักโหลดติด)
     if not serverData then
         for i = 1, 5 do
+            if not running() then return end
             serverData = refreshBag()
             if serverData then
-                Status("🎒 โหลดข้อมูลกระเป๋าสำเร็จ! Bag: " .. bagText())
+                Status(string.format("🎒 โหลดข้อมูลสำเร็จ! Rolls:%d Bag: %s", spinsLeft, bagText()))
                 break
             end
             task.wait(1)
@@ -435,18 +562,28 @@ local function StartAutoRoll()
         end
     end
 
+    -- 🛑 ตั๋วหมดตั้งแต่ยังไม่เริ่ม = ไม่ต้องเข้าลูปให้ยิงเปล่า
+    if serverData and spinsLeft <= 0 then
+        Status(string.format("🛑 ตั๋วหมดแล้ว (Rolls:%d) ไม่เริ่มสุ่ม Bag: %s", spinsLeft, bagText()))
+        setHud("🛑 ตั๋วหมดแล้ว  Bag: " .. bagShort())
+        return
+    end
+
     -- 🎲 ลูปสุ่มหลัก
+    -- ⏱️ เซิร์ฟเวอร์ล็อคช่วงห่างระหว่างโรลไว้ ~3.2 วิ (วัดจริงจากเซิร์ฟเวอร์)
+    -- ตั้งยิงทุก 4 วิ เผื่อไว้ให้ชัวร์ ไม่ยิงถี่จนได้ nil เปล่าๆ
+    local ROLL_COOLDOWN = 4
     local rollCount = 0
     local failStreak = 0
-    while _G.AutoRoll do
+    while running() do
         local okRoll, results = pcall(function() return {GET:InvokeServer("Family", "Roll")} end)
         if not okRoll then
             failStreak = failStreak + 1
             Status("⚠️ Roll error! ลองใหม่... (" .. failStreak .. ")")
             task.wait(2)
         else
-            -- 🎯 ระบบใหม่ของเกม: Roll ตอบกลับ = Spins, ExtraSpins, ตระกูล, Pity, ลิสต์อนิเมชั่น
-            -- จำนวนโรลที่เหลือจริง = Spins + ExtraSpins (ตรงกับเลขบนปุ่ม ROLL ในเกม)
+            -- 🎯 Roll ตอบกลับ (เทสจากเซิร์ฟเวอร์จริง): Spins, ExtraSpins, ตระกูล, Pity, ลิสต์อนิเมชั่น
+            -- จำนวนโรลที่เหลือจริง = Spins + ExtraSpins
             local spins = type(results[1]) == "number" and results[1] or 0
             local extraSpins = type(results[2]) == "number" and results[2] or 0
             local tickets = spins + extraSpins
@@ -458,19 +595,28 @@ local function StartAutoRoll()
             if gotValid then
                 failStreak = 0
                 rollCount = rollCount + 1
+                spinsLeft = tickets
                 local prio = getPriority(familyName)
 
-                -- 📡 อัปเดตทันทีหลังสุ่มทุกตา (เรียลไทม์)
+                -- 📡 อัปเดตทันทีหลังสุ่มทุกตา (เรียลไทม์) + ซิงค์เลขบนจอเกมให้ตรง
                 Status(string.format("Rolls:%d, Fam:%s, Pity:%d/400 Bag: %s", tickets, familyName, pity, bagText()))
+                setHud(string.format("Rolls: %d  |  Fam: %s  |  Bag: %s", tickets, familyName, bagShort()))
+                syncGameUI(tickets, pity)
 
                 if prio < 9999 then
                     Status(string.format("✨ เจอเป้าหมาย: %s! กำลังเก็บ... (Rolls:%d)", familyName, tickets))
                     if bagCount < bagMax then
                         task.wait(1.5)
                         local okStore, stored = pcall(function() return GET:InvokeServer("Family", "Store") end)
-                        refreshBag()
+                        local refreshed = refreshBag()
                         if okStore and stored == true then
+                            if not refreshed then
+                                -- เซิร์ฟไม่ตอบข้อมูลกระเป๋า: อัปเดตเองไปก่อน กันข้อมูลค้าง
+                                table.insert(bagFams, familyName)
+                                bagCount = bagCount + 1
+                            end
                             Status(string.format("Rolls:%d, Stored:%s Bag: %s", tickets, familyName, bagText()))
+                            setHud(string.format("✨ เก็บ %s แล้ว!  Bag: %s", familyName, bagShort()))
                         else
                             Status(string.format("⚠️ เก็บ %s ไม่สำเร็จ! Bag: %s", familyName, bagText()))
                         end
@@ -489,9 +635,21 @@ local function StartAutoRoll()
                             task.wait(1)
                             if deleteFamilyByName(worstFam) then
                                 task.wait(1)
-                                pcall(function() GET:InvokeServer("Family", "Store") end)
-                                refreshBag()
-                                Status(string.format("Rolls:%d, Swap:%s->%s Bag: %s", tickets, worstFam, familyName, bagText()))
+                                local okStore2, stored2 = pcall(function() return GET:InvokeServer("Family", "Store") end)
+                                local refreshed2 = refreshBag()
+                                if okStore2 and stored2 == true then
+                                    if not refreshed2 then
+                                        -- เซิร์ฟไม่ตอบข้อมูลกระเป๋า: แก้ค่าในเครื่องเองให้ตรงกับที่เกิดจริง
+                                        for bi, bf in ipairs(bagFams) do
+                                            if bf == worstFam then table.remove(bagFams, bi) break end
+                                        end
+                                        table.insert(bagFams, familyName)
+                                    end
+                                    Status(string.format("Rolls:%d, Swap:%s->%s Bag: %s", tickets, worstFam, familyName, bagText()))
+                                    setHud(string.format("✨ สลับ %s -> %s  Bag: %s", worstFam, familyName, bagShort()))
+                                else
+                                    Status(string.format("⚠️ ลบ %s แล้วแต่เก็บ %s ไม่สำเร็จ! Bag: %s", worstFam, familyName, bagText()))
+                                end
                             else
                                 Status("⚠️ ลบ " .. worstFam .. " ไม่สำเร็จ สุ่มต่อ...")
                             end
@@ -502,24 +660,35 @@ local function StartAutoRoll()
                 -- 🛑 เช็คตั๋วหมด (นับจาก Spins + ExtraSpins รวมกัน)
                 if tickets <= 0 then
                     Status(string.format("🛑 ตั๋วหมด! สุ่มไป %d ครั้ง, ล่าสุด:%s Bag: %s", rollCount, tostring(familyName), bagText()))
+                    setHud(string.format("🛑 ตั๋วหมด! สุ่มไป %d ครั้ง  Bag: %s", rollCount, bagShort()))
                     _G.AutoRoll = false
                     break
                 end
             else
-                -- 🐛 สุ่มไม่ติด! (remote ตอบกลับมาไม่ครบ) แจ้งแล้วสุ่มใหม่เลย ไม่เงียบหาย
+                -- ⏳ ได้ nil = ยังติด cooldown ของเซิร์ฟเวอร์ รอเงียบๆ แล้วลองใหม่ (ไม่ spam log)
                 failStreak = failStreak + 1
-                Status(string.format("🐛 สุ่มไม่ติด! (%d) ค่าที่ได้: %s, %s, %s - ลองใหม่...",
-                    failStreak, tostring(results[1]), tostring(results[2]), tostring(results[3])))
-                if failStreak >= 5 then
-                    -- ติดบัคหลายรอบ: ลอง Select slot ใหม่ปลุกเซิร์ฟเวอร์
-                    Status("🔧 บัคติดต่อกัน 5 รอบ! ลอง Select Slot ใหม่...")
+                if failStreak % 10 == 0 then
+                    Status("⏳ รอ cooldown สุ่ม... (พลาด " .. failStreak .. " ครั้งติด)")
+                end
+                if failStreak >= 30 then
+                    -- ติดนานผิดปกติ (~นาทีกว่า): เช็คตั๋วจากเซิร์ฟเวอร์ก่อน (ตั๋วหมด Roll จะตอบ nil ตลอด)
+                    Status("🔧 ติดนานผิดปกติ! เช็คตั๋ว + Select Slot ใหม่...")
+                    local d = refreshBag()
+                    if d and spinsLeft <= 0 then
+                        Status(string.format("🛑 ตั๋วหมด! สุ่มไป %d ครั้ง Bag: %s", rollCount, bagText()))
+                        setHud(string.format("🛑 ตั๋วหมด! สุ่มไป %d ครั้ง  Bag: %s", rollCount, bagShort()))
+                        _G.AutoRoll = false
+                        break
+                    end
                     pcall(function() GET:InvokeServer("Functions", "Select", _G.TargetSlot) end)
                     failStreak = 0
-                    task.wait(1)
                 end
+                task.wait(1)
             end
 
-            task.wait(_G.Delay)
+            if gotValid then
+                task.wait(math.max(_G.Delay, ROLL_COOLDOWN))
+            end
         end
     end
 end
@@ -527,7 +696,83 @@ end
 -- 🚀 เริ่มทำงานอัตโนมัติทันที (ไม่มี UI ให้กดแล้ว คุมผ่าน Config อย่างเดียว)
 if _G.AutoRoll then
     Status("Auto Roll starting... Slot:" .. _G.TargetSlot)
-    StartAutoRoll()
+    task.spawn(StartAutoRoll)
 else
     Status("AutoRoll = false in Config. Bot idle.")
+end
+]==]
+
+-- ============================================================
+-- 🎭 DISPATCHER: ยิงสคริปต์หลักเข้า Actor ด้วย run_on_actor
+-- (executor นี้ต้องรันบน actor ถึงจะเห็น/ยิง remote ได้เสถียร)
+-- ============================================================
+
+local roa = run_on_actor or (getgenv and getgenv().run_on_actor)
+local ga = getactors or (getgenv and getgenv().getactors)
+local ccc = create_comm_channel or (getgenv and getgenv().create_comm_channel)
+
+-- 📦 ส่ง Config จากฝั่งหลักตามเข้าไปใน Actor (คนละ VM กัน getgenv อาจไม่แชร์)
+local header = ""
+local cfg = getgenv and getgenv().Venoz_Config
+if type(cfg) == "table" then
+    local fams = {}
+    if type(cfg.TargetFamilies) == "table" then
+        for _, f in ipairs(cfg.TargetFamilies) do
+            table.insert(fams, string.format("%q", tostring(f)))
+        end
+    end
+    -- รายชื่อว่าง = ใช้ค่าเริ่มต้น (ห้ามส่ง {} เข้าไป เดี๋ยวบอทลบเกลี้ยงกระเป๋า)
+    if #fams == 0 then
+        fams = {'"Helos"', '"Fritz"', '"Ackerman"'}
+    end
+    -- Delay ต้องเป็นเลขจริงๆ เท่านั้น (inf/nan serialize แล้วพังทั้ง chunk)
+    local d = tonumber(cfg.Delay)
+    if d == nil or d ~= d or d == math.huge or d == -math.huge then d = 0.5 end
+    header = header .. string.format(
+        "getgenv().Venoz_Config = {AutoRoll=%s, TargetSlot=%q, TargetFamilies={%s}, Delay=%s}\n",
+        tostring(cfg.AutoRoll ~= false),
+        tostring(cfg.TargetSlot or "A"),
+        table.concat(fams, ","),
+        tostring(d)
+    )
+end
+
+-- 📡 เปิด comm channel ให้ Actor ส่งข้อความสถานะกลับมาให้ Horst
+if type(ccc) == "function" then
+    local okC, commId, commEvent = pcall(ccc)
+    if okC and commId ~= nil and commEvent ~= nil then
+        commEvent.Event:Connect(function(msg)
+            local f = _G.Horst_SetDescription or (getgenv and getgenv().Horst_SetDescription)
+            if type(f) == "function" then pcall(f, tostring(msg)) end
+        end)
+        if type(commId) == "number" then
+            header = header .. ("getgenv().Venoz_CommId = " .. tostring(commId) .. "\n")
+        else
+            header = header .. string.format("getgenv().Venoz_CommId = %q\n", tostring(commId))
+        end
+    end
+end
+
+local fullSource = header .. MAIN_SOURCE
+local launched = false
+
+if type(roa) == "function" and type(ga) == "function" then
+    local okA, actors = pcall(ga)
+    if okA and type(actors) == "table" and #actors > 0 then
+        local okRun = pcall(roa, actors[1], fullSource)
+        if okRun then
+            launched = true
+            print("🎭 [Venoz] Launched on Actor เรียบร้อย!")
+        end
+    end
+end
+
+if not launched then
+    print("🎭 [Venoz] ไม่มี actor ให้ใช้ - รันแบบปกติ")
+    local fn, err = loadstring(fullSource)
+    if fn then
+        fn()
+    else
+        warn("[Venoz] Load error: " .. tostring(err))
+    end
 end
