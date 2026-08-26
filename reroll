@@ -1,0 +1,392 @@
+-- ============================================================
+-- 🚀 Venoz Eiei Hub - AoT Revolution (Auto Roll + Auto Quest)
+-- ⚙️ V.27 - NO UI MODE (Text Status + Real-time Horst Update)
+-- ============================================================
+
+local Config = getgenv().Venoz_Config or {
+    AutoRoll = true,
+    TargetSlot = "A",
+    TargetFamilies = {"Helos", "Fritz", "Ackerman"},
+    Delay = 0.5
+}
+
+_G.AutoRoll = Config.AutoRoll
+_G.TargetSlot = Config.TargetSlot
+_G.TargetFamilies = Config.TargetFamilies
+_G.Delay = Config.Delay
+
+local MasterPriorityList = {
+    "Helos", "Fritz",
+    "Ackerman", "Yeager", "Reiss",
+    "Zoe", "Tybur", "Leonhart", "Galliard", "Finger", "Braun", "Arlert", "Ksaver",
+    "Smith", "Springer", "Kirstein", "Grice", "Azumabito", "Braus", "Kruger",
+    "Ral", "Reeves", "Pikale", "Munsell", "Inocenio", "Iglehaut", "Hume", "Blouse", "Bozado", "Boyega"
+}
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local MarketplaceService = game:GetService("MarketplaceService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local GuiService = game:GetService("GuiService")
+local TeleportService = game:GetService("TeleportService")
+
+while not Players.LocalPlayer do task.wait(0.1) end
+local plr = Players.LocalPlayer
+local playerGui = plr:WaitForChild("PlayerGui", 999)
+local interface = playerGui:WaitForChild("Interface", 999)
+
+-- 📡 ส่งข้อความสถานะ: ขึ้นทั้ง Console และ Horst แบบเรียลไทม์ (แทน UI)
+local function setHorstDesc(msg)
+    local func = _G.Horst_SetDescription or (getgenv and getgenv().Horst_SetDescription)
+    if type(func) == "function" then pcall(func, msg) end
+end
+
+local function Status(msg)
+    print("📢 [Venoz] " .. msg)
+    setHorstDesc(msg)
+end
+
+local function VIM_Click(guiObject)
+    if not guiObject then return false end
+    local absPos = guiObject.AbsolutePosition
+    local absSize = guiObject.AbsoluteSize
+    local inset = GuiService:GetGuiInset()
+    local centerX = absPos.X + (absSize.X / 2)
+    local centerY = absPos.Y + (absSize.Y / 2) + inset.Y
+    VirtualInputManager:SendMouseButtonEvent(centerX, centerY, 0, true, game, 1)
+    task.wait(0.05)
+    VirtualInputManager:SendMouseButtonEvent(centerX, centerY, 0, false, game, 1)
+    return true
+end
+
+local TITLE_PLACE_ID = 13379208636
+local function RejoinTitleScreen()
+    Status("Teleporting to Title...")
+    task.wait(1)
+    TeleportService:Teleport(TITLE_PLACE_ID, plr)
+    task.wait(15)
+end
+
+-- 🌟 ระบบสแกนหน้าจอแบบฉลาด (ป้องกันบอทใจร้อน)
+Status("Scanning Screen...")
+
+local inTitleScreen = false
+local inLobby = false
+
+for i = 1, 30 do
+    local titleUI = interface:FindFirstChild("Title_Screen")
+    if titleUI and titleUI.Visible then
+        inTitleScreen = true
+        break
+    end
+
+    local topbar = interface:FindFirstChild("Topbar")
+    if topbar and topbar.Visible then
+        inLobby = true
+        break
+    end
+
+    task.wait(1)
+end
+
+if inTitleScreen then
+    print("✅ [Title Mode] ตรวจพบว่าอยู่หน้า Title Screen แล้ว!")
+elseif inLobby then
+    print("✅ [Lobby Mode] ตรวจพบว่าอยู่ในหน้า Lobby แล้ว!")
+else
+    print("⚠️ [Warning] สแกนไม่เจอ UI ที่คุ้นเคย! บังคับเข้า Title Mode เพื่อความปลอดภัย")
+    inTitleScreen = true
+end
+
+-- ============================================================
+-- 🏰 โซนหน้า LOBBY (สแกนรับรางวัลอัตโนมัติ ไม่โหลด UI)
+-- ============================================================
+if not inTitleScreen then
+    Status("Lobby: Claiming Quests...")
+    task.wait(2)
+
+    local topbar = interface:WaitForChild("Topbar", 999)
+    if not topbar.Visible then
+        print("⌨️ เมนูซ่อนอยู่! กำลังจำลองการกดปุ่ม [Tab] เพื่อเปิดเมนู Lobby...")
+        VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Tab, false, game)
+        task.wait(0.1)
+        VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Tab, false, game)
+        task.wait(2)
+    end
+
+    print("🛠️ กำลังกระชากแถบเมนูหลบปุ่ม Roblox...")
+    pcall(function() topbar.Position = UDim2.new(0, 0, 0, 150) end)
+    task.wait(0.5)
+
+    local topbarMain = topbar:WaitForChild("Main", 999)
+    local questsTabBtn = topbarMain:WaitForChild("Categories", 999):WaitForChild("Quests", 999):WaitForChild("Interact", 999)
+
+    print("📜 กำลังคลิกปุ่มเปิด Quests บน Topbar...")
+    if VIM_Click(questsTabBtn) then
+        task.wait(2)
+    else
+        print("❌ หาปุ่ม Quests ไม่เจอ! วาร์ปกลับ Title")
+        RejoinTitleScreen()
+        return
+    end
+
+    local questsUI = interface:WaitForChild("Quests")
+    local questsContainer = questsUI:WaitForChild("Main"):WaitForChild("Details"):WaitForChild("Quests")
+    local clicked = 0
+
+    print("🎯 เริ่มสแกนเควสต์...")
+    for i = 1, 100 do
+        local foundClaim = false
+        for _, questFrame in pairs(questsContainer:GetChildren()) do
+            if questFrame:IsA("GuiObject") then
+                local claim = questFrame:FindFirstChild("Inner") and questFrame.Inner:FindFirstChild("Claim")
+                if claim and claim.Visible then
+                    local button = claim:FindFirstChild("Button")
+                    if button and button.Visible and button.AbsolutePosition.X > 0 then
+                        foundClaim = true
+                        if questsContainer:IsA("ScrollingFrame") then
+                            local targetY = questFrame.AbsolutePosition.Y - questsContainer.AbsolutePosition.Y + questsContainer.CanvasPosition.Y
+                            questsContainer.CanvasPosition = Vector2.new(0, targetY - 50)
+                            task.wait(0.2)
+                        end
+                        if VIM_Click(button) then
+                            clicked = clicked + 1
+                            Status("Lobby: Claimed " .. clicked .. " quests...")
+                            task.wait(0.6)
+                        end
+                        break
+                    end
+                end
+            end
+        end
+        if not foundClaim then break end
+    end
+
+    VIM_Click(questsTabBtn)
+    Status("Lobby Done: " .. clicked .. " quests claimed!")
+    RejoinTitleScreen()
+    return -- 🛑 จบการทำงานฝั่ง Lobby
+end
+
+-- ============================================================
+-- ⚔️ TITLE SCREEN MODE (NO UI - TEXT STATUS ONLY)
+-- ============================================================
+local Remotes = ReplicatedStorage:WaitForChild("Assets"):WaitForChild("Remotes")
+local GET = Remotes:WaitForChild("GET", 10)
+
+local function StartAutoRoll()
+    Status("Checking Gamepass & System...")
+
+    if not GET then
+        Status("ERROR: Remote GET not found!")
+        return
+    end
+
+    task.wait(1)
+
+    local hasFamilyBag = false
+    task.spawn(function()
+        pcall(function() hasFamilyBag = MarketplaceService:UserOwnsGamePassAsync(plr.UserId, 268079397) end)
+    end)
+    task.wait(0.5)
+
+    Status("Loading bag data from server...")
+
+    local function getPriority(name)
+        local upName = string.upper(name)
+        local isTarget = false
+        for _, target in ipairs(_G.TargetFamilies) do
+            if string.find(upName, string.upper(target)) then
+                isTarget = true
+                break
+            end
+        end
+        if not isTarget then return 9999 end
+        for i, master in ipairs(MasterPriorityList) do
+            if string.find(upName, string.upper(master)) then return i end
+        end
+        return 9999
+    end
+
+    local function getBagInfo(data, activeSlot)
+        local filledCount = 0
+        local fams = {}
+        local maxSlots = 1
+        if hasFamilyBag then maxSlots = maxSlots + 10 end
+        if data and data.Slots and data.Slots[activeSlot] then
+            local extra = data.Slots[activeSlot].Extra_Slots
+            if type(extra) == "number" then
+                maxSlots = maxSlots + extra
+            elseif type(extra) == "table" then
+                if type(extra.Families) == "number" then
+                    maxSlots = maxSlots + extra.Families
+                elseif type(extra.Family) == "number" then
+                    maxSlots = maxSlots + extra.Family
+                end
+            end
+            local inventory = data.Slots[activeSlot].Inventory
+            if inventory and type(inventory.Families) == "table" then
+                for _, famName in pairs(inventory.Families) do
+                    if type(famName) == "string" and famName ~= "" and famName ~= "None" then
+                        table.insert(fams, famName)
+                    end
+                end
+                filledCount = #fams
+            end
+        end
+        return maxSlots, filledCount, fams
+    end
+
+    -- 🎒 เก็บสถานะกระเป๋าไว้ในเครื่อง (ไม่ต้องยิงเซิร์ฟทุกรอบ = เรียลไทม์กว่าเดิม)
+    local bagMax, bagCount, bagFams = 1, 0, {}
+
+    local function bagText()
+        local famListText = bagCount > 0 and table.concat(bagFams, ", ") or "None"
+        return string.format("%d/%d %s", bagCount, bagMax, famListText)
+    end
+
+    local function refreshBag()
+        local ok, data = pcall(function() return GET:InvokeServer("Functions", "Settings", "Blur", "Off") end)
+        if ok and type(data) == "table" and type(data.Slots) == "table" then
+            bagMax, bagCount, bagFams = getBagInfo(data, _G.TargetSlot)
+            return data
+        end
+        return nil
+    end
+
+    local serverData = nil
+    local initTries = 0
+    while _G.AutoRoll and initTries < 10 do
+        serverData = refreshBag()
+        if serverData then break end
+        initTries = initTries + 1
+        task.wait(1)
+    end
+
+    if not _G.AutoRoll then return end
+    if not serverData then
+        Status("ERROR: Cannot load server data!")
+        return
+    end
+
+    -- 🛑 ตรวจสอบช่องกระเป๋าว่าครบ 6 ช่องหรือยัง?
+    if bagMax < 6 then
+        Status("Bag < 6 slots: Bypassing to Lobby...")
+        GET:InvokeServer("Functions", "Select", _G.TargetSlot)
+        task.wait(1.5)
+        pcall(function() GET:InvokeServer("Functions", "Teleport", "Lobby") end)
+        task.wait(15)
+        return
+    end
+
+    -- 🧹 เคลียร์เผ่าที่ไม่ได้อยู่ในเป้าหมายออกจากกระเป๋า
+    Status("Clearing non-target families...")
+    for _, fam in ipairs(bagFams) do
+        if getPriority(fam) == 9999 then
+            pcall(function() GET:InvokeServer("Family", "Delete", fam) end)
+            task.wait(0.5)
+        end
+    end
+    refreshBag()
+
+    Status("Ready! Bag: " .. bagText())
+
+    -- ▶️ กดปุ่ม PLAY เข้าสู่หน้า Slot อัตโนมัติ
+    pcall(function()
+        local titleUiNode = interface:FindFirstChild("Title_Screen")
+        if titleUiNode and titleUiNode.Visible then
+            local playBtn = titleUiNode:FindFirstChild("Main") and titleUiNode.Main:FindFirstChild("Buttons") and titleUiNode.Main.Buttons:FindFirstChild("Play")
+            if playBtn and playBtn.Visible then
+                Status("Pressing PLAY button...")
+                VIM_Click(playBtn)
+                task.wait(1.5)
+            end
+        end
+    end)
+
+    -- ⚡ Anti-AFK (ทำงานเบื้องหลัง ไม่ขัดขวางลูปหลัก)
+    task.spawn(function()
+        while _G.AutoRoll do
+            pcall(function()
+                if plr and plr.Character and plr.Character:FindFirstChild("HumanoidRootPart") then
+                    local hrp = plr.Character.HumanoidRootPart
+                    hrp.CFrame = hrp.CFrame * CFrame.new(0, 0.01, 0)
+                    task.wait(0.1)
+                    hrp.CFrame = hrp.CFrame * CFrame.new(0, -0.01, 0)
+                end
+            end)
+            task.wait(30)
+        end
+    end)
+
+    GET:InvokeServer("Functions", "Select", _G.TargetSlot)
+    task.wait(1)
+
+    -- 🎲 ลูปสุ่มหลัก
+    local rollCount = 0
+    while _G.AutoRoll do
+        local okRoll, results = pcall(function() return {GET:InvokeServer("Family", "Roll")} end)
+        if not okRoll then
+            Status("Roll failed, retrying...")
+            task.wait(2)
+        else
+            local tickets = results[1]
+            local familyName = results[3] or results[2]
+
+            if type(tickets) == "number" and type(familyName) == "string" and familyName ~= "" then
+                rollCount = rollCount + 1
+                local prio = getPriority(familyName)
+
+                -- 📡 อัปเดต Horst ทันทีหลังสุ่ม (เรียลไทม์ ไม่รอเซิร์ฟเวอร์)
+                -- Format: สปินเหลือ, กำลังสุ่มได้อะไร, ในกระเป๋ามีตระกูลไหนบ้าง
+                Status(string.format("Spins:%d, Roll#%d Got:%s, Bag:%s", tickets, rollCount, familyName, bagText()))
+
+                if prio < 9999 then
+                    Status(string.format("TARGET FOUND: %s! Storing... (Spins:%d)", familyName, tickets))
+                    if bagCount < bagMax then
+                        task.wait(1.5)
+                        pcall(function() GET:InvokeServer("Family", "Store") end)
+                        refreshBag()
+                        Status(string.format("Stored %s! Spins:%d, Bag:%s", familyName, tickets, bagText()))
+                    else
+                        -- กระเป๋าเต็ม: หาเผ่าที่แย่ที่สุดมาแทนที่
+                        local worstFam = nil
+                        local worstPrio = -1
+                        for _, bFam in ipairs(bagFams) do
+                            local bPrio = getPriority(bFam)
+                            if bPrio > worstPrio then
+                                worstPrio = bPrio
+                                worstFam = bFam
+                            end
+                        end
+                        if worstFam and prio < worstPrio then
+                            task.wait(1)
+                            pcall(function() GET:InvokeServer("Family", "Delete", worstFam) end)
+                            task.wait(1)
+                            pcall(function() GET:InvokeServer("Family", "Store") end)
+                            refreshBag()
+                            Status(string.format("Swapped %s -> %s! Spins:%d, Bag:%s", worstFam, familyName, tickets, bagText()))
+                        end
+                    end
+                end
+            end
+
+            -- 🛑 เช็คตั๋วหมด
+            if type(tickets) == "number" and tickets <= 0 then
+                Status(string.format("OUT OF SPINS! Total rolls:%d, Last:%s, Bag:%s", rollCount, tostring(familyName), bagText()))
+                _G.AutoRoll = false
+                break
+            end
+
+            task.wait(_G.Delay)
+        end
+    end
+end
+
+-- 🚀 เริ่มทำงานอัตโนมัติทันที (ไม่มี UI ให้กดแล้ว คุมผ่าน Config อย่างเดียว)
+if _G.AutoRoll then
+    Status("Auto Roll starting... Slot:" .. _G.TargetSlot .. " Targets:" .. table.concat(_G.TargetFamilies, ", "))
+    StartAutoRoll()
+else
+    Status("AutoRoll = false in Config. Bot idle.")
+end
