@@ -768,6 +768,8 @@ if type(ccc) == "function" then
     local okC, commId, commEvent = pcall(ccc)
     if okC and commId ~= nil and commEvent ~= nil then
         commEvent.Event:Connect(function(msg)
+            -- โชว์ log ใน console ฝั่งหลักด้วย (print จากใน actor ไม่ขึ้น console ของ executor)
+            print("📢 [Venoz] " .. tostring(msg))
             local f = _G.Horst_SetDescription or (getgenv and getgenv().Horst_SetDescription)
             if type(f) == "function" then pcall(f, tostring(msg)) end
         end)
