@@ -67,32 +67,44 @@ local function RejoinTitleScreen()
     task.wait(15)
 end
 
--- 🌟 ตรวจโหมดด้วย PlaceId (แม่นกว่าสแกน UI เพราะหน้า Title กับ Lobby เป็นคนละ place)
-Status("Checking current place...")
+-- 🌟 ระบบสแกนหน้าจอแบบฉลาด (แบบต้นฉบับ V.26 + กด Tab ช่วยถ้าเมนู Lobby ซ่อนอยู่)
+print("⏳ [System] กำลังสแกนหน้าจอ รอให้ UI เกมโหลดเสร็จ...")
+setHorstDesc("Scanning Screen...")
 
 local inTitleScreen = false
+local inLobby = false
 
-if game.PlaceId == TITLE_PLACE_ID then
-    inTitleScreen = true
-    print("✅ [Title Mode] PlaceId ตรงกับหน้า Title Screen!")
+for i = 1, 30 do
+    local titleUI = interface:FindFirstChild("Title_Screen")
+    if titleUI and titleUI.Visible then
+        inTitleScreen = true
+        break
+    end
+
+    local topbar = interface:FindFirstChild("Topbar")
+    if topbar and topbar.Visible then
+        inLobby = true
+        break
+    end
+
+    -- 🆕 ถ้าสแกนไปสักพักยังไม่เจออะไรเลย อาจอยู่ Lobby ที่เมนูซ่อนอยู่ → ลองกด Tab เรียกเมนู
+    if i == 8 or i == 16 or i == 24 then
+        print("⌨️ ยังไม่เจอ UI... ลองกด [Tab] เผื่ออยู่ Lobby ที่เมนูซ่อนอยู่")
+        VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Tab, false, game)
+        task.wait(0.1)
+        VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Tab, false, game)
+    end
+
+    task.wait(1)
+end
+
+if inTitleScreen then
+    print("✅ [Title Mode] ตรวจพบว่าอยู่หน้า Title Screen แล้ว!")
+elseif inLobby then
+    print("✅ [Lobby Mode] ตรวจพบว่าอยู่ในหน้า Lobby แล้ว!")
 else
-    -- เผื่อ PlaceId เกมอัปเดต: สแกน UI สั้นๆ ยืนยันอีกรอบ
-    for i = 1, 10 do
-        local titleUI = interface:FindFirstChild("Title_Screen")
-        if titleUI and titleUI.Visible then
-            inTitleScreen = true
-            break
-        end
-        if interface:FindFirstChild("Topbar") then
-            break -- มี Topbar = อยู่ Lobby แน่นอน
-        end
-        task.wait(1)
-    end
-    if inTitleScreen then
-        print("✅ [Title Mode] เจอ Title_Screen UI!")
-    else
-        print("✅ [Lobby Mode] PlaceId ไม่ใช่หน้า Title = อยู่ Lobby!")
-    end
+    print("⚠️ [Warning] สแกนไม่เจอ UI ที่คุ้นเคย! บังคับเข้า Title Mode เพื่อความปลอดภัย")
+    inTitleScreen = true
 end
 
 -- ============================================================
