@@ -175,6 +175,17 @@ local function Status(msg)
     setHorstDesc(msg)
 end
 
+-- 📌 ค้างข้อความสรุปสุดท้ายไว้ที่ Horst: ส่งซ้ำทุก 20 วิ กันโดนข้อความอื่นทับ
+-- หยุดเองทันทีเมื่อมีการรันสคริปต์รอบใหม่ (run token เปลี่ยน)
+local function holdFinal(msg)
+    task.spawn(function()
+        while _G.VenozRun == RUN_ID do
+            setHorstDesc(msg)
+            task.wait(20)
+        end
+    end)
+end
+
 local function VIM_Click(guiObject)
     if not guiObject then return false end
     local absPos = guiObject.AbsolutePosition
@@ -563,9 +574,18 @@ local function StartAutoRoll()
     end
 
     -- 🛑 ตั๋วหมดตั้งแต่ยังไม่เริ่ม = ไม่ต้องเข้าลูปให้ยิงเปล่า
+    -- (โชว์ผลสุ่มล่าสุดของรอบก่อนด้วย ถ้ามีจำไว้)
     if serverData and spinsLeft <= 0 then
-        Status(string.format("🛑 ตั๋วหมดแล้ว (Rolls:%d) ไม่เริ่มสุ่ม Bag: %s", spinsLeft, bagText()))
-        setHud("🛑 ตั๋วหมดแล้ว  Bag: " .. bagShort())
+        local lastTxt = ""
+        local last = _G.VenozLast
+        if type(last) == "table" and last.fam then
+            lastTxt = string.format(" | ล่าสุดได้: %s (%s)", tostring(last.fam), tostring(last.t or "?"))
+        end
+        local finalMsg = string.format("🛑 ตั๋วหมดแล้ว (Rolls:%d)%s Bag: %s", spinsLeft, lastTxt, bagText())
+        Status(finalMsg)
+        setHud("🛑 ตั๋วหมดแล้ว" .. lastTxt .. "  Bag: " .. bagShort())
+        _G.AutoRoll = false
+        holdFinal(finalMsg)
         return
     end
 
@@ -602,6 +622,8 @@ local function StartAutoRoll()
                 Status(string.format("Rolls:%d, Fam:%s, Pity:%d/400 Bag: %s", tickets, familyName, pity, bagText()))
                 setHud(string.format("Rolls: %d  |  Fam: %s  |  Bag: %s", tickets, familyName, bagShort()))
                 syncGameUI(tickets, pity)
+                -- จำผลสุ่มล่าสุดไว้ (อยู่ข้ามการรันซ้ำ ใช้โชว์ตอนตั๋วหมด)
+                _G.VenozLast = {fam = familyName, count = rollCount, bag = bagShort(), t = os.date("%H:%M:%S")}
 
                 if prio < 9999 then
                     Status(string.format("✨ เจอเป้าหมาย: %s! กำลังเก็บ... (Rolls:%d)", familyName, tickets))
@@ -659,9 +681,11 @@ local function StartAutoRoll()
 
                 -- 🛑 เช็คตั๋วหมด (นับจาก Spins + ExtraSpins รวมกัน)
                 if tickets <= 0 then
-                    Status(string.format("🛑 ตั๋วหมด! สุ่มไป %d ครั้ง, ล่าสุด:%s Bag: %s", rollCount, tostring(familyName), bagText()))
-                    setHud(string.format("🛑 ตั๋วหมด! สุ่มไป %d ครั้ง  Bag: %s", rollCount, bagShort()))
+                    local finalMsg = string.format("🛑 ตั๋วหมด! สุ่มไป %d ครั้ง, ล่าสุด:%s Bag: %s", rollCount, tostring(familyName), bagText())
+                    Status(finalMsg)
+                    setHud(string.format("🛑 ตั๋วหมด! สุ่มไป %d ครั้ง, ล่าสุด:%s  Bag: %s", rollCount, tostring(familyName), bagShort()))
                     _G.AutoRoll = false
+                    holdFinal(finalMsg)
                     break
                 end
             else
@@ -675,9 +699,11 @@ local function StartAutoRoll()
                     Status("🔧 ติดนานผิดปกติ! เช็คตั๋ว + Select Slot ใหม่...")
                     local d = refreshBag()
                     if d and spinsLeft <= 0 then
-                        Status(string.format("🛑 ตั๋วหมด! สุ่มไป %d ครั้ง Bag: %s", rollCount, bagText()))
+                        local finalMsg = string.format("🛑 ตั๋วหมด! สุ่มไป %d ครั้ง Bag: %s", rollCount, bagText())
+                        Status(finalMsg)
                         setHud(string.format("🛑 ตั๋วหมด! สุ่มไป %d ครั้ง  Bag: %s", rollCount, bagShort()))
                         _G.AutoRoll = false
+                        holdFinal(finalMsg)
                         break
                     end
                     pcall(function() GET:InvokeServer("Functions", "Select", _G.TargetSlot) end)
