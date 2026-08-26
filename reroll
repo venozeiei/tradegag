@@ -338,35 +338,36 @@ local function StartAutoRoll()
     end
 
     if not _G.AutoRoll then return end
+
+    -- ⚠️ โหลดข้อมูลไม่ได้ = ไปต่อแบบต้นฉบับ (ข้อมูลจะโหลดได้เองหลังเลือก Slot) ห้ามหยุด!
     if not serverData then
-        Status("ERROR: Cannot load server data!")
-        return
-    end
+        Status("⚠️ ยังโหลดข้อมูลกระเป๋าไม่ได้ ไปต่อก่อน เดี๋ยวลองใหม่หลังเลือก Slot")
+    else
+        Status(string.format("🎒 Bag check: max=%d, filled=%d, fams=%s", bagMax, bagCount, table.concat(bagFams, ", ")))
 
-    Status(string.format("🎒 Bag check: max=%d, filled=%d, fams=%s", bagMax, bagCount, table.concat(bagFams, ", ")))
-
-    -- 🛑 ตรวจสอบช่องกระเป๋าว่าครบ 6 ช่องหรือยัง?
-    -- (ถ้ามีตระกูลในกระเป๋าครบ 6 ตัวแล้ว = ช่องต้องมีอย่างน้อย 6 อยู่แล้ว ไม่ต้องไป Lobby)
-    if bagMax < 6 and bagCount < 6 then
-        Status(string.format("Bag %d/%d < 6 slots: Bypassing to Lobby...", bagCount, bagMax))
-        GET:InvokeServer("Functions", "Select", _G.TargetSlot)
-        task.wait(1.5)
-        pcall(function() GET:InvokeServer("Functions", "Teleport", "Lobby") end)
-        task.wait(15)
-        return
-    end
-
-    -- 🧹 เคลียร์เผ่าที่ไม่ได้อยู่ในเป้าหมายออกจากกระเป๋า
-    Status("Clearing non-target families...")
-    for _, fam in ipairs(bagFams) do
-        if getPriority(fam) == 9999 then
-            pcall(function() GET:InvokeServer("Family", "Delete", fam) end)
-            task.wait(0.5)
+        -- 🛑 ตรวจสอบช่องกระเป๋า (เฉพาะตอนที่มีข้อมูลจริงเท่านั้น ไม่เดาจากข้อมูลว่าง)
+        -- (ถ้ามีตระกูลในกระเป๋าครบ 6 ตัวแล้ว = ช่องต้องมีอย่างน้อย 6 อยู่แล้ว ไม่ต้องไป Lobby)
+        if bagMax < 6 and bagCount < 6 then
+            Status(string.format("Bag %d/%d < 6 slots: Bypassing to Lobby...", bagCount, bagMax))
+            GET:InvokeServer("Functions", "Select", _G.TargetSlot)
+            task.wait(1.5)
+            pcall(function() GET:InvokeServer("Functions", "Teleport", "Lobby") end)
+            task.wait(15)
+            return
         end
-    end
-    refreshBag()
 
-    Status("Ready! Bag: " .. bagText())
+        -- 🧹 เคลียร์เผ่าที่ไม่ได้อยู่ในเป้าหมายออกจากกระเป๋า
+        Status("Clearing non-target families...")
+        for _, fam in ipairs(bagFams) do
+            if getPriority(fam) == 9999 then
+                pcall(function() GET:InvokeServer("Family", "Delete", fam) end)
+                task.wait(0.5)
+            end
+        end
+        refreshBag()
+
+        Status("Ready! Bag: " .. bagText())
+    end
 
     -- ▶️ กดปุ่ม PLAY เข้าสู่หน้า Slot อัตโนมัติ
     pcall(function()
@@ -398,6 +399,21 @@ local function StartAutoRoll()
 
     GET:InvokeServer("Functions", "Select", _G.TargetSlot)
     task.wait(1)
+
+    -- 🔄 ถ้าตอนแรกโหลดข้อมูลกระเป๋าไม่ได้ ลองใหม่หลังเลือก Slot แล้ว (จังหวะนี้มักโหลดติด)
+    if not serverData then
+        for i = 1, 5 do
+            serverData = refreshBag()
+            if serverData then
+                Status("🎒 โหลดข้อมูลกระเป๋าสำเร็จ! Bag: " .. bagText())
+                break
+            end
+            task.wait(1)
+        end
+        if not serverData then
+            Status("⚠️ ยังโหลดกระเป๋าไม่ได้ สุ่มไปก่อน (จะอัปเดตเองตอนเก็บเผ่า)")
+        end
+    end
 
     -- 🎲 ลูปสุ่มหลัก
     local rollCount = 0
