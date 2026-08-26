@@ -297,20 +297,23 @@ local function StartAutoRoll()
                 end
             end
             local inventory = data.Slots[activeSlot].Inventory
+            local famIdx = {}
             if inventory and type(inventory.Families) == "table" then
-                for _, famName in pairs(inventory.Families) do
+                for i, famName in ipairs(inventory.Families) do
                     if type(famName) == "string" and famName ~= "" and famName ~= "None" then
                         table.insert(fams, famName)
+                        table.insert(famIdx, i) -- จำตำแหน่งจริงในกระเป๋า (ระบบ Delete ใหม่ใช้เลขช่อง)
                     end
                 end
                 filledCount = #fams
             end
+            return maxSlots, filledCount, fams, famIdx
         end
-        return maxSlots, filledCount, fams
+        return maxSlots, filledCount, fams, {}
     end
 
     -- 🎒 เก็บสถานะกระเป๋าไว้ในเครื่อง (ไม่ต้องยิงเซิร์ฟทุกรอบ = เรียลไทม์กว่าเดิม)
-    local bagMax, bagCount, bagFams = 1, 0, {}
+    local bagMax, bagCount, bagFams, bagIdx = 1, 0, {}, {}
 
     local function bagText()
         local famListText = bagCount > 0 and table.concat(bagFams, ", ") or "None"
@@ -320,12 +323,20 @@ local function StartAutoRoll()
     local function refreshBag()
         local ok, data = pcall(function() return GET:InvokeServer("Functions", "Settings", "Blur", "Off") end)
         if ok and type(data) == "table" and type(data.Slots) == "table" then
-            bagMax, bagCount, bagFams = getBagInfo(data, _G.TargetSlot)
+            bagMax, bagCount, bagFams, bagIdx = getBagInfo(data, _G.TargetSlot)
             -- กันคำนวณ max พลาด: ถ้าของในกระเป๋าเยอะกว่า max ที่คำนวณได้ ให้เชื่อจำนวนของจริง
             if bagCount > bagMax then bagMax = bagCount end
             return data
         end
         return nil
+    end
+
+    -- 🗑️ ลบตระกูลออกจากกระเป๋าด้วยชื่อ (เทสกับเซิร์ฟเวอร์จริงแล้ว: ส่งชื่อ = true, ส่งเลข = false)
+    local function deleteFamilyByName(name)
+        local ok, res = pcall(function()
+            return GET:InvokeServer("Family", "Delete", name)
+        end)
+        return ok and res == true
     end
 
     local serverData = nil
@@ -357,14 +368,23 @@ local function StartAutoRoll()
         end
 
         -- 🧹 เคลียร์เผ่าที่ไม่ได้อยู่ในเป้าหมายออกจากกระเป๋า
+        -- (ลบทีละตัวแล้วโหลดกระเป๋าใหม่ทุกครั้ง เพราะเลขช่องขยับหลังลบ)
         Status("Clearing non-target families...")
-        for _, fam in ipairs(bagFams) do
-            if getPriority(fam) == 9999 then
-                pcall(function() GET:InvokeServer("Family", "Delete", fam) end)
-                task.wait(0.5)
+        local clearing = true
+        while clearing do
+            clearing = false
+            for _, fam in ipairs(bagFams) do
+                if getPriority(fam) == 9999 then
+                    if deleteFamilyByName(fam) then
+                        Status("🗑️ ลบ " .. fam .. " ออกจากกระเป๋า")
+                        clearing = true
+                    end
+                    task.wait(0.5)
+                    refreshBag()
+                    break
+                end
             end
         end
-        refreshBag()
 
         Status("Ready! Bag: " .. bagText())
     end
@@ -425,24 +445,35 @@ local function StartAutoRoll()
             Status("⚠️ Roll error! ลองใหม่... (" .. failStreak .. ")")
             task.wait(2)
         else
-            local tickets = results[1]
-            local familyName = results[3] or results[2]
+            -- 🎯 ระบบใหม่ของเกม: Roll ตอบกลับ = Spins, ExtraSpins, ตระกูล, Pity, ลิสต์อนิเมชั่น
+            -- จำนวนโรลที่เหลือจริง = Spins + ExtraSpins (ตรงกับเลขบนปุ่ม ROLL ในเกม)
+            local spins = type(results[1]) == "number" and results[1] or 0
+            local extraSpins = type(results[2]) == "number" and results[2] or 0
+            local tickets = spins + extraSpins
+            local familyName = results[3]
+            local pity = type(results[4]) == "number" and results[4] or 0
+            local gotValid = (type(results[1]) == "number" or type(results[2]) == "number")
+                and type(familyName) == "string" and familyName ~= ""
 
-            if type(tickets) == "number" and type(familyName) == "string" and familyName ~= "" then
+            if gotValid then
                 failStreak = 0
                 rollCount = rollCount + 1
                 local prio = getPriority(familyName)
 
-                -- 📡 อัปเดตทันทีหลังสุ่มทุกตา (เรียลไทม์) รูปแบบเดียวกับต้นฉบับ
-                Status(string.format("Rolls:%d, Fam:%s Bag: %s", tickets, familyName, bagText()))
+                -- 📡 อัปเดตทันทีหลังสุ่มทุกตา (เรียลไทม์)
+                Status(string.format("Rolls:%d, Fam:%s, Pity:%d/400 Bag: %s", tickets, familyName, pity, bagText()))
 
                 if prio < 9999 then
                     Status(string.format("✨ เจอเป้าหมาย: %s! กำลังเก็บ... (Rolls:%d)", familyName, tickets))
                     if bagCount < bagMax then
                         task.wait(1.5)
-                        pcall(function() GET:InvokeServer("Family", "Store") end)
+                        local okStore, stored = pcall(function() return GET:InvokeServer("Family", "Store") end)
                         refreshBag()
-                        Status(string.format("Rolls:%d, Stored:%s Bag: %s", tickets, familyName, bagText()))
+                        if okStore and stored == true then
+                            Status(string.format("Rolls:%d, Stored:%s Bag: %s", tickets, familyName, bagText()))
+                        else
+                            Status(string.format("⚠️ เก็บ %s ไม่สำเร็จ! Bag: %s", familyName, bagText()))
+                        end
                     else
                         -- กระเป๋าเต็ม: หาเผ่าที่แย่ที่สุดมาแทนที่
                         local worstFam = nil
@@ -456,19 +487,29 @@ local function StartAutoRoll()
                         end
                         if worstFam and prio < worstPrio then
                             task.wait(1)
-                            pcall(function() GET:InvokeServer("Family", "Delete", worstFam) end)
-                            task.wait(1)
-                            pcall(function() GET:InvokeServer("Family", "Store") end)
-                            refreshBag()
-                            Status(string.format("Rolls:%d, Swap:%s->%s Bag: %s", tickets, worstFam, familyName, bagText()))
+                            if deleteFamilyByName(worstFam) then
+                                task.wait(1)
+                                pcall(function() GET:InvokeServer("Family", "Store") end)
+                                refreshBag()
+                                Status(string.format("Rolls:%d, Swap:%s->%s Bag: %s", tickets, worstFam, familyName, bagText()))
+                            else
+                                Status("⚠️ ลบ " .. worstFam .. " ไม่สำเร็จ สุ่มต่อ...")
+                            end
                         end
                     end
+                end
+
+                -- 🛑 เช็คตั๋วหมด (นับจาก Spins + ExtraSpins รวมกัน)
+                if tickets <= 0 then
+                    Status(string.format("🛑 ตั๋วหมด! สุ่มไป %d ครั้ง, ล่าสุด:%s Bag: %s", rollCount, tostring(familyName), bagText()))
+                    _G.AutoRoll = false
+                    break
                 end
             else
                 -- 🐛 สุ่มไม่ติด! (remote ตอบกลับมาไม่ครบ) แจ้งแล้วสุ่มใหม่เลย ไม่เงียบหาย
                 failStreak = failStreak + 1
-                Status(string.format("🐛 สุ่มไม่ติด! (%d) ค่าที่ได้: %s, %s - ลองใหม่...",
-                    failStreak, tostring(results[1]), tostring(results[2] or results[3])))
+                Status(string.format("🐛 สุ่มไม่ติด! (%d) ค่าที่ได้: %s, %s, %s - ลองใหม่...",
+                    failStreak, tostring(results[1]), tostring(results[2]), tostring(results[3])))
                 if failStreak >= 5 then
                     -- ติดบัคหลายรอบ: ลอง Select slot ใหม่ปลุกเซิร์ฟเวอร์
                     Status("🔧 บัคติดต่อกัน 5 รอบ! ลอง Select Slot ใหม่...")
@@ -476,13 +517,6 @@ local function StartAutoRoll()
                     failStreak = 0
                     task.wait(1)
                 end
-            end
-
-            -- 🛑 เช็คตั๋วหมด
-            if type(tickets) == "number" and tickets <= 0 then
-                Status(string.format("🛑 ตั๋วหมด! สุ่มไป %d ครั้ง, ล่าสุด:%s Bag: %s", rollCount, tostring(familyName), bagText()))
-                _G.AutoRoll = false
-                break
             end
 
             task.wait(_G.Delay)
